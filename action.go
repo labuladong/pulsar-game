@@ -76,11 +76,12 @@ type SetBombEvent struct {
 func (e *SetBombEvent) handle(game *Game) {
 	log.Info("handle SetBombEvent")
 	bombName := game.setBombWithTrigger(e.bombName, e.pos, make(chan struct{}))
-	if strings.HasPrefix(bombName, game.localPlayerName+"-") {
+	if strings.HasPrefix(bombName, "random-") ||
+		strings.HasPrefix(bombName, game.localPlayerName+"-") {
 		// send explode message
 		go func() {
 			// bomb will explode after 2 seconds
-			bombTimer := time.NewTimer(3 * time.Second)
+			bombTimer := time.NewTimer(2 * time.Second)
 			<-bombTimer.C
 			game.sendSync(&ExplodeEvent{
 				bombName: bombName,
@@ -107,7 +108,8 @@ func (e *ExplodeEvent) handle(game *Game) {
 	default:
 	}
 	game.explode(bomb.pos)
-	if strings.HasPrefix(bomb.bombName, game.localPlayerName+"-") {
+	if strings.HasPrefix(bomb.bombName, "random-") ||
+		strings.HasPrefix(bomb.bombName, game.localPlayerName+"-") {
 		go func() {
 			// explosion flame will disappear after 2 seconds
 			flameTimer := time.NewTimer(2 * time.Second)

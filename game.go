@@ -1,10 +1,12 @@
 package main
 
 import (
+	"fmt"
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
 	"image/color"
+	"math/rand"
 	"strings"
 	"time"
 )
@@ -117,14 +119,14 @@ func (g *Game) Update() error {
 		}
 	}
 
-	if bomb {
+	// set bomb on empty block
+	if _, ok := g.posToBombs[localPlayer.pos]; !ok && bomb {
 		info.pos = localPlayer.pos
 		event := &SetBombEvent{
 			bombName: info.name + "-" + randStringRunes(5),
 			pos:      info.pos,
 		}
 		g.sendSync(event)
-
 	}
 
 	return nil
@@ -174,6 +176,10 @@ func (g *Game) Draw(screen *ebiten.Image) {
 
 	for pos, _ := range g.posToBombs {
 		ebitenutil.DrawRect(screen, float64(pos.X*gridSize), float64(pos.Y*gridSize), gridSize, gridSize, bombColor)
+	}
+
+	if !g.nameToPlayers[g.localPlayerName].alive {
+		ebitenutil.DebugPrint(screen, fmt.Sprintf("You are dead, press R to revive."))
 	}
 
 	for pos, val := range g.flameMap {
@@ -267,6 +273,27 @@ func newGame(playerName, roomName, keyPath string) *Game {
 	g.sendCh = make(chan Event, 20)
 	// use this channel to receive from pulsar
 	g.eventCh = g.client.start(g.sendCh)
+
+	// after every player join the game, add a random bomb generator
+	go func() {
+		// every one seconds, generate a new bomb
+		ticker := time.NewTicker(time.Second)
+		for {
+			select {
+			case <-ticker.C:
+				randomPos := Position{
+					X: rand.Intn(xGridCountInScreen),
+					Y: rand.Intn(yGridCountInScreen),
+				}
+				if _, ok := g.posToBombs[randomPos]; !ok {
+					g.sendSync(&SetBombEvent{
+						bombName: "random-" + randStringRunes(5),
+						pos:      randomPos,
+					})
+				}
+			}
+		}
+	}()
 
 	return g
 }
