@@ -4,6 +4,7 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
+	"image/color"
 	"time"
 )
 
@@ -16,11 +17,15 @@ const (
 )
 
 type Game struct {
-	// local player name
+	// local player playerName
 	localPlayerName string
-	nameToPlays     map[string]*playerInfo
-	posToBombs      map[Position]*Bomb
-	flameMap        map[Position]struct{}
+	nameToPlayers   map[string]*playerInfo
+	posToPlayers    map[Position]*playerInfo
+
+	nameToBombs map[string]*Bomb
+	posToBombs  map[Position]*Bomb
+
+	flameMap map[Position]int
 
 	// receive event to redraw our game
 	eventCh chan Event
@@ -37,6 +42,14 @@ func (g *Game) Update() error {
 	default:
 	}
 
+	localPlayer := g.nameToPlayers[g.localPlayerName]
+
+	info := &playerInfo{
+		name:   localPlayer.name,
+		avatar: localPlayer.avatar,
+		alive:  localPlayer.alive,
+	}
+
 	var dir = dirNone
 	var bomb = false
 	if inpututil.IsKeyJustPressed(ebiten.KeyArrowLeft) || inpututil.IsKeyJustPressed(ebiten.KeyA) {
@@ -49,55 +62,108 @@ func (g *Game) Update() error {
 		dir = dirUp
 	} else if inpututil.IsKeyJustPressed(ebiten.KeySpace) {
 		bomb = true
+	} else if inpututil.IsKeyJustPressed(ebiten.KeyR) {
+		// revive
+		event := &UserReviveEvent{
+			playerInfo: info,
+		}
+		g.sendSync(event)
 	} else if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
-
+		// quit game
 	}
 
-	localPlayer := g.nameToPlays[g.localPlayerName]
-
-	info := &playerInfo{
-		name:   localPlayer.name,
-		avatar: localPlayer.avatar,
-		alive:  localPlayer.alive,
+	if val, ok := g.flameMap[localPlayer.pos]; ok && val > 0 && localPlayer.alive {
+		// dead due to boom
+		event := &UserDeadEvent{
+			playerInfo: info,
+		}
+		g.sendSync(event)
 	}
 
 	if dir != dirNone && localPlayer.alive {
-		info.pos = moveToNextPosition(localPlayer.pos, dir)
+		nexPos := getNextPosition(localPlayer.pos, dir)
+		info.pos = nexPos
 		event := &UserMoveEvent{
 			playerInfo: info,
 		}
-		g.sendCh <- event
+		g.sendSync(event)
+		if bomb, ok := g.posToBombs[nexPos]; ok {
+			// push the bomb
+			go func(bomb *Bomb, direction Direction) {
+				nextPos := getNextPosition(bomb.pos, dir)
+				ticker := time.NewTicker(time.Second / 2)
+				for i := 0; i < 8; i++ {
+					select {
+					case <-bomb.explodeCh:
+						// bomb exploded, stop
+						return
+					case <-ticker.C:
+						if !validCoordinate(nextPos.X, nextPos.Y) {
+							// move to border, stop
+							return
+						}
+						event := &BombMoveEvent{
+							bombName: bomb.bombName,
+							pos:      nextPos,
+						}
+						g.sendSync(event)
+						nextPos = getNextPosition(nextPos, dir)
+					}
+				}
+			}(bomb, dir)
+		}
 	}
 
 	if bomb {
 		info.pos = localPlayer.pos
-		event := &SetBoomEvent{
+		event := &SetBombEvent{
 			playerInfo: info,
 		}
-		g.sendCh <- event
-
-		// explode after 2 seconds
-		go func() {
-			// bomb will explode after 2 seconds
-			bombTimer := time.NewTimer(2 * time.Second)
-			<-bombTimer.C
-			g.sendCh <- &ExplodeEvent{
-				pos: localPlayer.pos,
-			}
-			// explosion flame will disappear after 2 seconds
-			flameTimer := time.NewTimer(2 * time.Second)
-			<-flameTimer.C
-			g.sendCh <- &UndoExplodeEvent{
-				pos: localPlayer.pos,
-			}
-		}()
+		g.sendSync(event)
 	}
 
 	return nil
 }
 
+// setBomb create a bomb with trigger channel
+func (g *Game) setBombWithTrigger(playerName string, position Position, trigger chan struct{}) string {
+	bomb := &Bomb{
+		bombName:   playerName + "-" + randStringRunes(5),
+		playerName: playerName,
+		pos:        position,
+		explodeCh:  trigger,
+	}
+	g.nameToBombs[bomb.bombName] = bomb
+	g.posToBombs[bomb.pos] = bomb
+	return bomb.bombName
+}
+
+func (g *Game) removeBomb(bombName string) {
+	if bomb, ok := g.nameToBombs[bombName]; ok {
+		delete(g.nameToBombs, bombName)
+		if _, ok = g.posToBombs[bomb.pos]; ok {
+			delete(g.posToBombs, bomb.pos)
+		}
+	}
+}
+
+func (g *Game) sendSync(event Event) {
+	// don't block
+	select {
+	case g.sendCh <- event:
+	default:
+	}
+}
+
 func (g *Game) Draw(screen *ebiten.Image) {
-	for _, player := range g.nameToPlays {
+	// todo replace Rect with images
+	for _, player := range g.nameToPlayers {
+		var userColor color.RGBA
+		if player.alive {
+			userColor = playerColor
+		} else {
+			userColor = deadPlayerColor
+		}
 		ebitenutil.DrawRect(screen, float64(player.pos.X*gridSize), float64(player.pos.Y*gridSize), gridSize, gridSize, userColor)
 	}
 
@@ -105,8 +171,11 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		ebitenutil.DrawRect(screen, float64(pos.X*gridSize), float64(pos.Y*gridSize), gridSize, gridSize, bombColor)
 	}
 
-	for pos, _ := range g.flameMap {
-		ebitenutil.DrawRect(screen, float64(pos.X*gridSize), float64(pos.Y*gridSize), gridSize, gridSize, flameColor)
+	for pos, val := range g.flameMap {
+		// only val > 0 means flame
+		if val > 0 {
+			ebitenutil.DrawRect(screen, float64(pos.X*gridSize), float64(pos.Y*gridSize), gridSize, gridSize, flameColor)
+		}
 	}
 }
 
@@ -115,17 +184,25 @@ func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
 }
 
 func (g *Game) explode(pos Position) {
-	if _, ok := g.posToBombs[pos]; !ok {
+	if bomb, ok := g.posToBombs[pos]; !ok {
 		return
+	} else {
+		g.removeBomb(bomb.bombName)
 	}
-	delete(g.posToBombs, pos)
 	for i := pos.X - 2; i < pos.X+3; i++ {
 		for j := pos.Y - 2; j < pos.Y+3; j++ {
-			if validCoordinate(i, j) {
-				g.flameMap[Position{
-					X: i,
-					Y: j,
-				}] = struct{}{}
+			position := Position{
+				X: i,
+				Y: j,
+			}
+			if val, ok := g.flameMap[position]; ok {
+				g.flameMap[position] = val + 1
+			} else {
+				g.flameMap[position] = 1
+			}
+			// dead player
+			if player, ok := g.posToPlayers[position]; ok {
+				player.alive = false
 			}
 		}
 	}
@@ -135,15 +212,21 @@ func (g *Game) unExplode(pos Position) {
 	for i := pos.X - 2; i < pos.X+3; i++ {
 		for j := pos.Y - 2; j < pos.Y+3; j++ {
 			if validCoordinate(i, j) {
-				delete(g.flameMap, Position{X: i, Y: j})
+				position := Position{
+					X: i,
+					Y: j,
+				}
+				if val, ok := g.flameMap[position]; ok {
+					g.flameMap[position] = val - 1
+				}
 			}
 		}
 	}
 }
 
-func newGame(name, keyPath string) *Game {
+func newGame(playerName, roomName, keyPath string) *Game {
 	info := &playerInfo{
-		name:   name,
+		name:   playerName,
 		avatar: "fff",
 		pos: Position{
 			X: 10,
@@ -152,13 +235,18 @@ func newGame(name, keyPath string) *Game {
 		alive: true,
 	}
 	g := &Game{
-		localPlayerName: name,
-		client:          newPulsarClient("test-11", name, keyPath),
-		nameToPlays:     map[string]*playerInfo{},
+		localPlayerName: playerName,
+		nameToPlayers:   map[string]*playerInfo{},
+		posToPlayers:    map[Position]*playerInfo{},
+		nameToBombs:     map[string]*Bomb{},
 		posToBombs:      map[Position]*Bomb{},
-		flameMap:        map[Position]struct{}{},
+		flameMap:        map[Position]int{},
+		eventCh:         nil,
+		sendCh:          nil,
+		client:          newPulsarClient("room-"+roomName, playerName, keyPath),
 	}
-	g.nameToPlays[info.name] = info
+	g.nameToPlayers[info.name] = info
+	g.posToPlayers[info.pos] = info
 
 	// use this channel to send to pulsar
 	g.sendCh = make(chan Event, 20)

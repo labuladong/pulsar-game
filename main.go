@@ -11,10 +11,13 @@ import (
 func main() {
 	ebiten.SetWindowSize(screenWidth, screenHeight)
 	ebiten.SetWindowTitle("Bomb man")
-	fmt.Println("input player name:")
+	fmt.Println("input room name:")
 	reader := bufio.NewReader(os.Stdin)
-	name, _ := reader.ReadString('\n')
-	if err := ebiten.RunGame(newGame(name, "/Users/labuladong/sndev-kjtest.json")); err != nil {
+	roomName, _ := reader.ReadString('\n')
+	fmt.Println("input player name:")
+	playerName, _ := reader.ReadString('\n')
+
+	if err := ebiten.RunGame(newGame(playerName, roomName, "/Users/labuladong/sndev-kjtest.json")); err != nil {
 		log.Fatal(err)
 	}
 }

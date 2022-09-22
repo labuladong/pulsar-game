@@ -96,7 +96,7 @@ func (c *pulsarClient) start(in chan Event) chan Event {
 				if err != nil {
 					log.Fatal(err)
 				}
-				log.Warning("receive message from pulsar:\n", string(msg.Payload()))
+				log.Info("receive message from pulsar:\n", string(msg.Payload()))
 				outCh <- convertMsgToEvent(&actionMsg)
 
 			// need to send message to pulsar
@@ -110,7 +110,7 @@ func (c *pulsarClient) start(in chan Event) chan Event {
 				if err != nil {
 					return
 				}
-				log.Warning("send message to pulsar:\n", string(bytes))
+				//log.Warning("send message to pulsar:\n", string(bytes))
 
 			case <-c.closeCh:
 				goto stop
@@ -136,13 +136,31 @@ func convertEventToMsg(action Event) *EventMessage {
 	case *UserJoinEvent:
 		msg = &EventMessage{
 			Type:   UserJoinEventType,
-			Name:   t.playerInfo.name,
-			Avatar: t.playerInfo.avatar,
+			Name:   t.name,
+			Avatar: t.avatar,
 			X:      t.pos.X,
 			Y:      t.pos.Y,
 			Alive:  t.alive,
 		}
-	case *SetBoomEvent:
+	case *UserDeadEvent:
+		msg = &EventMessage{
+			Type:   UserDeadEventType,
+			Name:   t.name,
+			Avatar: t.avatar,
+			X:      t.pos.X,
+			Y:      t.pos.Y,
+			Alive:  false,
+		}
+	case *UserReviveEvent:
+		msg = &EventMessage{
+			Type:   UserReviveEventType,
+			Name:   t.name,
+			Avatar: t.avatar,
+			X:      t.pos.X,
+			Y:      t.pos.Y,
+			Alive:  true,
+		}
+	case *SetBombEvent:
 		msg = &EventMessage{
 			Type:   SetBombEventType,
 			Name:   t.playerInfo.name,
@@ -151,10 +169,17 @@ func convertEventToMsg(action Event) *EventMessage {
 			Y:      t.pos.Y,
 			Alive:  t.alive,
 		}
+	case *BombMoveEvent:
+		msg = &EventMessage{
+			Type: MoveBombEventType,
+			Name: t.bombName,
+			X:    t.pos.X,
+			Y:    t.pos.Y,
+		}
 	case *ExplodeEvent:
 		msg = &EventMessage{
 			Type: ExplodeEventType,
-			Name: t.name,
+			Name: t.bombName,
 			X:    t.pos.X,
 			Y:    t.pos.Y,
 		}
@@ -184,17 +209,30 @@ func convertMsgToEvent(msg *EventMessage) Event {
 			playerInfo: info,
 		}
 	case SetBombEventType:
-		return &SetBoomEvent{
+		return &SetBombEvent{
 			playerInfo: info,
+		}
+	case MoveBombEventType:
+		return &BombMoveEvent{
+			bombName: msg.Name,
+			pos:      info.pos,
 		}
 	case UserMoveEventType:
 		return &UserMoveEvent{
 			playerInfo: info,
 		}
+	case UserDeadEventType:
+		return &UserDeadEvent{
+			playerInfo: info,
+		}
+	case UserReviveEventType:
+		return &UserReviveEvent{
+			playerInfo: info,
+		}
 	case ExplodeEventType:
 		return &ExplodeEvent{
-			name: info.name,
-			pos:  info.pos,
+			bombName: msg.Name,
+			pos:      info.pos,
 		}
 	case UndoExplodeEventType:
 		return &UndoExplodeEvent{

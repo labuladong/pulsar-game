@@ -1,11 +1,15 @@
 package main
 
-import "image/color"
+import (
+	"image/color"
+	"math/rand"
+)
 
 var (
-	userColor  = color.RGBA{R: 0xFF, A: 0xff}
-	bombColor  = color.RGBA{R: 0xab, A: 0xff}
-	flameColor = color.RGBA{R: 0xab, A: 0xab}
+	playerColor     = color.RGBA{R: 0xFF, A: 0xff, G: 0x34}
+	deadPlayerColor = color.RGBA{R: 0xeb, A: 0xc4, G: 0x40}
+	bombColor       = color.RGBA{R: 0xab, A: 0xff, G: 0x3d}
+	flameColor      = color.RGBA{R: 0xab, A: 0xab, G: 0xf4}
 )
 
 type playerInfo struct {
@@ -26,7 +30,7 @@ const (
 	dirUp
 )
 
-func moveToNextPosition(position Position, direction Direction) Position {
+func getNextPosition(position Position, direction Direction) Position {
 	f := map[Direction]func(int, int) (int, int){
 		dirLeft: func(x int, y int) (int, int) {
 			return x - 1, y
@@ -65,6 +69,17 @@ type Position struct {
 
 type Bomb struct {
 	// the player name
-	name string
-	pos  Position
+	playerName, bombName string
+	pos                  Position
+	// when exploded, this chanel will receive a message, control bomb moving
+	explodeCh chan struct{}
+}
+
+func randStringRunes(n int) string {
+	var letterRunes = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+	b := make([]rune, n)
+	for i := range b {
+		b[i] = letterRunes[rand.Intn(len(letterRunes))]
+	}
+	return string(b)
 }

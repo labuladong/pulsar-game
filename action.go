@@ -1,9 +1,17 @@
 package main
 
+import (
+	log "github.com/sirupsen/logrus"
+	"time"
+)
+
 const (
 	UserMoveEventType    = "UserMoveEvent"
 	UserJoinEventType    = "UserJoinEvent"
+	UserDeadEventType    = "UserDeadEvent"
+	UserReviveEventType  = "UserReviveEvent"
 	SetBombEventType     = "SetBombEvent"
+	MoveBombEventType    = "BombMoveEvent"
 	ExplodeEventType     = "ExplodeEvent"
 	UndoExplodeEventType = "UndoExplodeEvent"
 )
@@ -19,16 +27,18 @@ type UserMoveEvent struct {
 }
 
 func (a *UserMoveEvent) handle(g *Game) {
+	log.Info("handle UserMoveEvent")
 	newX, newY := a.pos.X, a.pos.Y
 	if !validCoordinate(newX, newY) {
 		// move out of boarder
 		return
 	}
-	if player, ok := g.nameToPlays[a.name]; ok && !player.alive {
+	if player, ok := g.nameToPlayers[a.name]; ok && !player.alive {
 		// already dead
 		return
 	}
-	g.nameToPlays[a.name] = a.playerInfo
+	g.nameToPlayers[a.name] = a.playerInfo
+	g.posToPlayers[a.pos] = a.playerInfo
 }
 
 type UserDeadEvent struct {
@@ -36,8 +46,15 @@ type UserDeadEvent struct {
 }
 
 func (e *UserDeadEvent) handle(game *Game) {
-	//TODO implement me
-	panic("implement me")
+	game.nameToPlayers[e.name].alive = false
+}
+
+type UserReviveEvent struct {
+	*playerInfo
+}
+
+func (e *UserReviveEvent) handle(game *Game) {
+	game.nameToPlayers[e.name].alive = true
 }
 
 type UserJoinEvent struct {
@@ -49,21 +66,47 @@ func (e *UserJoinEvent) handle(game *Game) {
 	panic("implement me")
 }
 
-type SetBoomEvent struct {
+type SetBombEvent struct {
 	*playerInfo
 }
 
-func (e *SetBoomEvent) handle(game *Game) {
-	game.posToBombs[e.pos] = &Bomb{pos: e.pos, name: e.name}
+func (e *SetBombEvent) handle(game *Game) {
+	log.Info("handle SetBombEvent")
+	bombName := game.setBombWithTrigger(e.name, e.pos, make(chan struct{}))
+	// explode after 2 seconds
+	go func() {
+		// bomb will explode after 2 seconds
+		bombTimer := time.NewTimer(3 * time.Second)
+		<-bombTimer.C
+		game.sendSync(&ExplodeEvent{
+			bombName: bombName,
+		})
+	}()
 }
 
 type ExplodeEvent struct {
-	name string
-	pos  Position
+	bombName string
+	pos      Position
 }
 
 func (e *ExplodeEvent) handle(game *Game) {
-	game.explode(e.pos)
+	log.Info("handle ExplodeEvent")
+	bomb := game.nameToBombs[e.bombName]
+	// async notify, if this bomb is moving, it will stop moving
+	select {
+	case bomb.explodeCh <- struct{}{}:
+	default:
+	}
+	game.explode(bomb.pos)
+
+	go func() {
+		// explosion flame will disappear after 2 seconds
+		flameTimer := time.NewTimer(2 * time.Second)
+		<-flameTimer.C
+		game.sendSync(&UndoExplodeEvent{
+			pos: bomb.pos,
+		})
+	}()
 }
 
 type UndoExplodeEvent struct {
@@ -72,4 +115,26 @@ type UndoExplodeEvent struct {
 
 func (e *UndoExplodeEvent) handle(game *Game) {
 	game.unExplode(e.pos)
+}
+
+type BombMoveEvent struct {
+	// bomb playerName, generate by player info
+	bombName string
+	pos      Position
+}
+
+func (e *BombMoveEvent) handle(game *Game) {
+	log.Info("handle BombMoveEvent")
+	bomb, ok := game.nameToBombs[e.bombName]
+	if !ok {
+		return
+	}
+	_, ok = game.posToBombs[bomb.pos]
+	if !ok {
+		return
+	}
+	// move this bomb
+	delete(game.posToBombs, bomb.pos)
+	bomb.pos = e.pos
+	game.posToBombs[e.pos] = bomb
 }
