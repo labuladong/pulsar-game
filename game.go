@@ -15,6 +15,7 @@ const (
 	gridSize           = 10
 	xGridCountInScreen = screenWidth / gridSize
 	yGridCountInScreen = screenHeight / gridSize
+	bombLength         = 8
 )
 
 type Game struct {
@@ -193,36 +194,65 @@ func (g *Game) explode(pos Position) {
 	} else {
 		g.removeBomb(bomb.bombName)
 	}
-	for i := pos.X - 2; i < pos.X+3; i++ {
-		for j := pos.Y - 2; j < pos.Y+3; j++ {
-			position := Position{
-				X: i,
-				Y: j,
-			}
-			if val, ok := g.flameMap[position]; ok {
-				g.flameMap[position] = val + 1
-			} else {
-				g.flameMap[position] = 1
-			}
-			// dead player
-			if player, ok := g.posToPlayers[position]; ok {
-				player.alive = false
-			}
+	x := pos.X
+	y := pos.Y
+	for i := pos.X - bombLength; i < pos.X+bombLength+1; i++ {
+		position := Position{
+			X: i,
+			Y: y,
+		}
+		if val, ok := g.flameMap[position]; ok {
+			g.flameMap[position] = val + 1
+		} else {
+			g.flameMap[position] = 1
+		}
+		// dead player
+		if player, ok := g.posToPlayers[position]; ok {
+			player.alive = false
 		}
 	}
+
+	for j := pos.Y - bombLength; j < pos.Y+bombLength+1; j++ {
+		position := Position{
+			X: x,
+			Y: j,
+		}
+		if val, ok := g.flameMap[position]; ok {
+			g.flameMap[position] = val + 1
+		} else {
+			g.flameMap[position] = 1
+		}
+		// dead player
+		if player, ok := g.posToPlayers[position]; ok {
+			player.alive = false
+		}
+	}
+
 }
 
 func (g *Game) unExplode(pos Position) {
-	for i := pos.X - 2; i < pos.X+3; i++ {
-		for j := pos.Y - 2; j < pos.Y+3; j++ {
-			if validCoordinate(i, j) {
-				position := Position{
-					X: i,
-					Y: j,
-				}
-				if val, ok := g.flameMap[position]; ok {
-					g.flameMap[position] = val - 1
-				}
+	x := pos.X
+	y := pos.Y
+	for i := pos.X - bombLength; i < pos.X+bombLength+1; i++ {
+		if validCoordinate(i, y) {
+			position := Position{
+				X: i,
+				Y: y,
+			}
+			if val, ok := g.flameMap[position]; ok {
+				g.flameMap[position] = val - 1
+			}
+		}
+	}
+
+	for j := pos.Y - bombLength; j < pos.Y+bombLength+1; j++ {
+		if validCoordinate(x, j) {
+			position := Position{
+				X: x,
+				Y: j,
+			}
+			if val, ok := g.flameMap[position]; ok {
+				g.flameMap[position] = val - 1
 			}
 		}
 	}

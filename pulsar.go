@@ -97,6 +97,7 @@ func (c *pulsarClient) start(in chan Event) chan Event {
 					log.Fatal(err)
 				}
 				log.Info("receive message from pulsar:\n", string(msg.Payload()))
+				cm.Ack(msg)
 				outCh <- convertMsgToEvent(&actionMsg)
 
 			// need to send message to pulsar
