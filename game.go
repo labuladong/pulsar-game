@@ -5,6 +5,7 @@ import (
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
 	"image/color"
+	"strings"
 	"time"
 )
 
@@ -46,6 +47,7 @@ func (g *Game) Update() error {
 
 	info := &playerInfo{
 		name:   localPlayer.name,
+		pos:    localPlayer.pos,
 		avatar: localPlayer.avatar,
 		alive:  localPlayer.alive,
 	}
@@ -117,19 +119,21 @@ func (g *Game) Update() error {
 	if bomb {
 		info.pos = localPlayer.pos
 		event := &SetBombEvent{
-			playerInfo: info,
+			bombName: info.name + "-" + randStringRunes(5),
+			pos:      info.pos,
 		}
 		g.sendSync(event)
+
 	}
 
 	return nil
 }
 
 // setBomb create a bomb with trigger channel
-func (g *Game) setBombWithTrigger(playerName string, position Position, trigger chan struct{}) string {
+func (g *Game) setBombWithTrigger(bombName string, position Position, trigger chan struct{}) string {
 	bomb := &Bomb{
-		bombName:   playerName + "-" + randStringRunes(5),
-		playerName: playerName,
+		bombName:   bombName,
+		playerName: strings.Split(bombName, "-")[0],
 		pos:        position,
 		explodeCh:  trigger,
 	}

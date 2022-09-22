@@ -2,6 +2,7 @@ package main
 
 import (
 	log "github.com/sirupsen/logrus"
+	"strings"
 	"time"
 )
 
@@ -54,6 +55,7 @@ type UserReviveEvent struct {
 }
 
 func (e *UserReviveEvent) handle(game *Game) {
+	game.nameToPlayers[e.name] = e.playerInfo
 	game.nameToPlayers[e.name].alive = true
 }
 
@@ -67,21 +69,24 @@ func (e *UserJoinEvent) handle(game *Game) {
 }
 
 type SetBombEvent struct {
-	*playerInfo
+	bombName string
+	pos      Position
 }
 
 func (e *SetBombEvent) handle(game *Game) {
 	log.Info("handle SetBombEvent")
-	bombName := game.setBombWithTrigger(e.name, e.pos, make(chan struct{}))
-	// explode after 2 seconds
-	go func() {
-		// bomb will explode after 2 seconds
-		bombTimer := time.NewTimer(3 * time.Second)
-		<-bombTimer.C
-		game.sendSync(&ExplodeEvent{
-			bombName: bombName,
-		})
-	}()
+	bombName := game.setBombWithTrigger(e.bombName, e.pos, make(chan struct{}))
+	if strings.HasPrefix(bombName, game.localPlayerName+"-") {
+		// send explode message
+		go func() {
+			// bomb will explode after 2 seconds
+			bombTimer := time.NewTimer(3 * time.Second)
+			<-bombTimer.C
+			game.sendSync(&ExplodeEvent{
+				bombName: bombName,
+			})
+		}()
+	}
 }
 
 type ExplodeEvent struct {
@@ -98,15 +103,16 @@ func (e *ExplodeEvent) handle(game *Game) {
 	default:
 	}
 	game.explode(bomb.pos)
-
-	go func() {
-		// explosion flame will disappear after 2 seconds
-		flameTimer := time.NewTimer(2 * time.Second)
-		<-flameTimer.C
-		game.sendSync(&UndoExplodeEvent{
-			pos: bomb.pos,
-		})
-	}()
+	if strings.HasPrefix(bomb.bombName, game.localPlayerName+"-") {
+		go func() {
+			// explosion flame will disappear after 2 seconds
+			flameTimer := time.NewTimer(2 * time.Second)
+			<-flameTimer.C
+			game.sendSync(&UndoExplodeEvent{
+				pos: bomb.pos,
+			})
+		}()
+	}
 }
 
 type UndoExplodeEvent struct {

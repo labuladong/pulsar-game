@@ -110,7 +110,7 @@ func (c *pulsarClient) start(in chan Event) chan Event {
 				if err != nil {
 					return
 				}
-				//log.Warning("send message to pulsar:\n", string(bytes))
+				log.Warning("send message to pulsar:\n", string(bytes))
 
 			case <-c.closeCh:
 				goto stop
@@ -162,12 +162,10 @@ func convertEventToMsg(action Event) *EventMessage {
 		}
 	case *SetBombEvent:
 		msg = &EventMessage{
-			Type:   SetBombEventType,
-			Name:   t.playerInfo.name,
-			Avatar: t.playerInfo.avatar,
-			X:      t.pos.X,
-			Y:      t.pos.Y,
-			Alive:  t.alive,
+			Type: SetBombEventType,
+			Name: t.bombName,
+			X:    t.pos.X,
+			Y:    t.pos.Y,
 		}
 	case *BombMoveEvent:
 		msg = &EventMessage{
@@ -210,7 +208,8 @@ func convertMsgToEvent(msg *EventMessage) Event {
 		}
 	case SetBombEventType:
 		return &SetBombEvent{
-			playerInfo: info,
+			bombName: msg.Name,
+			pos:      info.pos,
 		}
 	case MoveBombEventType:
 		return &BombMoveEvent{
