@@ -194,28 +194,19 @@ func (g *Game) explode(pos Position) {
 	} else {
 		g.removeBomb(bomb.bombName)
 	}
-	x := pos.X
-	y := pos.Y
+
+	// flames
+	var positions []Position
 	for i := pos.X - bombLength; i < pos.X+bombLength+1; i++ {
-		position := Position{
-			X: i,
-			Y: y,
-		}
-		if val, ok := g.flameMap[position]; ok {
-			g.flameMap[position] = val + 1
-		} else {
-			g.flameMap[position] = 1
-		}
-		// dead player
-		if player, ok := g.posToPlayers[position]; ok {
-			player.alive = false
-		}
+		positions = append(positions, Position{X: i, Y: pos.Y})
+	}
+	for j := pos.Y - bombLength; j < pos.Y+bombLength+1; j++ {
+		positions = append(positions, Position{X: pos.X, Y: j})
 	}
 
-	for j := pos.Y - bombLength; j < pos.Y+bombLength+1; j++ {
-		position := Position{
-			X: x,
-			Y: j,
+	for _, position := range positions {
+		if !validCoordinate(position.X, position.Y) {
+			continue
 		}
 		if val, ok := g.flameMap[position]; ok {
 			g.flameMap[position] = val + 1
@@ -231,29 +222,19 @@ func (g *Game) explode(pos Position) {
 }
 
 func (g *Game) unExplode(pos Position) {
-	x := pos.X
-	y := pos.Y
+	var positions []Position
 	for i := pos.X - bombLength; i < pos.X+bombLength+1; i++ {
-		if validCoordinate(i, y) {
-			position := Position{
-				X: i,
-				Y: y,
-			}
-			if val, ok := g.flameMap[position]; ok {
-				g.flameMap[position] = val - 1
-			}
-		}
+		positions = append(positions, Position{X: i, Y: pos.Y})
 	}
-
 	for j := pos.Y - bombLength; j < pos.Y+bombLength+1; j++ {
-		if validCoordinate(x, j) {
-			position := Position{
-				X: x,
-				Y: j,
-			}
-			if val, ok := g.flameMap[position]; ok {
-				g.flameMap[position] = val - 1
-			}
+		positions = append(positions, Position{X: pos.X, Y: j})
+	}
+	for _, position := range positions {
+		if !validCoordinate(position.X, position.Y) {
+			continue
+		}
+		if val, ok := g.flameMap[position]; ok {
+			g.flameMap[position] = val - 1
 		}
 	}
 }
