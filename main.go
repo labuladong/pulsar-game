@@ -17,7 +17,7 @@ func main() {
 	fmt.Println("input player name:")
 	playerName, _ := reader.ReadString('\n')
 
-	if err := ebiten.RunGame(newGame(playerName, "roomName", "/Users/labuladong/sndev-kjtest.json")); err != nil {
+	if err := ebiten.RunGame(newGame(playerName, "roomName", "/Users/labuladong/Downloads/o-7udlj-free.json")); err != nil {
 		log.Fatal(err)
 	}
 }

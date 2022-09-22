@@ -40,13 +40,13 @@ func newPulsarClient(topic, subscriptionName, keyPath string) *pulsarClient {
 	oauthConfig := map[string]string{
 		"type":       "client_credentials",
 		"issuerUrl":  "https://auth.streamnative.cloud/",
-		"audience":   "urn:sn:pulsar:sndev:kj-game",
+		"audience":   "urn:sn:pulsar:o-7udlj:free",
 		"privateKey": keyPath,
 		"clientId":   "fdl_test",
 	}
 	oauth := pulsar.NewAuthenticationOAuth2(oauthConfig)
 	client, err := pulsar.NewClient(pulsar.ClientOptions{
-		URL:            "pulsar+ssl://kj-game.sndev.snio.cloud:6651",
+		URL:            "pulsar+ssl://free.o-7udlj.aws-cnn1.streamnative.aws.snpulsar.cn:6651",
 		Authentication: oauth,
 	})
 	if err != nil {
