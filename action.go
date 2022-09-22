@@ -96,7 +96,11 @@ type ExplodeEvent struct {
 
 func (e *ExplodeEvent) handle(game *Game) {
 	log.Info("handle ExplodeEvent")
-	bomb := game.nameToBombs[e.bombName]
+	bomb, ok := game.nameToBombs[e.bombName]
+	if !ok {
+		// bombs are set to the same place will cause this situation
+		return
+	}
 	// async notify, if this bomb is moving, it will stop moving
 	select {
 	case bomb.explodeCh <- struct{}{}:
