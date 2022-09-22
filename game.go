@@ -13,6 +13,7 @@ const (
 	gridSize           = 10
 	xGridCountInScreen = screenWidth / gridSize
 	yGridCountInScreen = screenHeight / gridSize
+	bombLength         = 8
 )
 
 type Game struct {
@@ -118,25 +119,40 @@ func (g *Game) explode(pos Position) {
 	if _, ok := g.posToBombs[pos]; !ok {
 		return
 	}
+
 	delete(g.posToBombs, pos)
-	for i := pos.X - 2; i < pos.X+3; i++ {
-		for j := pos.Y - 2; j < pos.Y+3; j++ {
-			if validCoordinate(i, j) {
-				g.flameMap[Position{
-					X: i,
-					Y: j,
-				}] = struct{}{}
-			}
+	x := pos.X
+	y := pos.Y
+	for i := pos.X - bombLength; i < pos.X+bombLength+1; i++ {
+		if validCoordinate(i, y) {
+			g.flameMap[Position{
+				X: i,
+				Y: y,
+			}] = struct{}{}
 		}
 	}
+	for j := pos.Y - bombLength; j < pos.Y+bombLength+1; j++ {
+		if validCoordinate(j, y) {
+			g.flameMap[Position{
+				X: x,
+				Y: j,
+			}] = struct{}{}
+		}
+	}
+
 }
 
 func (g *Game) unExplode(pos Position) {
-	for i := pos.X - 2; i < pos.X+3; i++ {
-		for j := pos.Y - 2; j < pos.Y+3; j++ {
-			if validCoordinate(i, j) {
-				delete(g.flameMap, Position{X: i, Y: j})
-			}
+	x := pos.X
+	y := pos.Y
+	for i := pos.X - bombLength; i < pos.X+bombLength+1; i++ {
+		if validCoordinate(i, y) {
+			delete(g.flameMap, Position{X: i, Y: y})
+		}
+	}
+	for j := pos.Y - bombLength; j < pos.Y+bombLength+1; j++ {
+		if validCoordinate(x, j) {
+			delete(g.flameMap, Position{X: x, Y: j})
 		}
 	}
 }
