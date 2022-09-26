@@ -2,8 +2,10 @@
 
 - [x] Players who touch the bomb flame will die.
 
+- [x] Players can `push` bomb, this action can make bomb move linearly.
+
 - [ ] Generate random obstacles in grids.
 
-- [x] Players can `push` bomb, this action can make bomb move linearly.
+- [ ] Use `seek` to avoid action replay. 
 
 - [ ] Build go code to web assembly to deploy this game on web.

@@ -17,7 +17,10 @@ func main() {
 	fmt.Println("input player name:")
 	playerName, _ := reader.ReadString('\n')
 
-	if err := ebiten.RunGame(newGame(playerName, "roomName", "/Users/labuladong/Downloads/o-7udlj-free.json")); err != nil {
+	game := newGame(playerName, "roomName", "/Users/labuladong/Downloads/o-7udlj-free.json")
+	game.randomBombs()
+	defer game.Close()
+	if err := ebiten.RunGame(game); err != nil {
 		log.Fatal(err)
 	}
 }

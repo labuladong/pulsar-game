@@ -8,8 +8,9 @@ import (
 var (
 	playerColor     = color.RGBA{R: 0xFF, A: 0xff, G: 0x34}
 	deadPlayerColor = color.RGBA{R: 0xeb, A: 0xc4, G: 0x40}
-	bombColor       = color.RGBA{R: 0xab, A: 0xff, G: 0x3d}
-	flameColor      = color.RGBA{R: 0xab, A: 0xab, G: 0xf4}
+	bombColor       = color.RGBA{R: 218, G: 165, B: 32, A: 0xff}
+	flameColor      = color.RGBA{R: 255, G: 215, B: 0, A: 0xaf}
+	obstacleColor   = color.White
 )
 
 type playerInfo struct {
@@ -49,17 +50,15 @@ func getNextPosition(position Position, direction Direction) Position {
 		},
 	}
 	x, y := f[direction](position.X, position.Y)
-	res := Position{}
-	if validCoordinate(x, y) {
-		res.X = x
-		res.Y = y
+	res := Position{X: x, Y: y}
+	if validCoordinate(res) {
 		return res
 	}
 	return position
 }
 
-func validCoordinate(x, y int) bool {
-	return x >= 0 && y >= 0 && x < xGridCountInScreen && y < yGridCountInScreen
+func validCoordinate(pos Position) bool {
+	return pos.X >= 0 && pos.Y >= 0 && pos.X < xGridCountInScreen && pos.Y < yGridCountInScreen
 }
 
 type Position struct {
@@ -82,4 +81,36 @@ func randStringRunes(n int) string {
 		b[i] = letterRunes[rand.Intn(len(letterRunes))]
 	}
 	return string(b)
+}
+
+func encodeXY(x, y int) int {
+	return y*xGridCountInScreen + x
+}
+
+func decodeXY(code int) (int, int) {
+	return code % xGridCountInScreen, code / xGridCountInScreen
+}
+
+// sample k number in [0, n)
+func sample(n, k int) []int {
+	pickedNums := make([]int, k)
+	for i := 0; i < k; i++ {
+		pickedNums[i] = i
+	}
+	for i := k; i < n; i++ {
+		r := rand.Intn(i + 1)
+		if r < k {
+			pickedNums[r] = i
+		}
+	}
+	return pickedNums
+}
+
+func sliceContains(slice []Position, p Position) bool {
+	for _, e := range slice {
+		if e == p {
+			return true
+		}
+	}
+	return false
 }

@@ -7,14 +7,15 @@ import (
 )
 
 const (
-	UserMoveEventType    = "UserMoveEvent"
-	UserJoinEventType    = "UserJoinEvent"
-	UserDeadEventType    = "UserDeadEvent"
-	UserReviveEventType  = "UserReviveEvent"
-	SetBombEventType     = "SetBombEvent"
-	MoveBombEventType    = "BombMoveEvent"
-	ExplodeEventType     = "ExplodeEvent"
-	UndoExplodeEventType = "UndoExplodeEvent"
+	UserMoveEventType     = "UserMoveEvent"
+	UserJoinEventType     = "UserJoinEvent"
+	UserDeadEventType     = "UserDeadEvent"
+	UserReviveEventType   = "UserReviveEvent"
+	SetBombEventType      = "SetBombEvent"
+	MoveBombEventType     = "BombMoveEvent"
+	ExplodeEventType      = "ExplodeEvent"
+	UndoExplodeEventType  = "UndoExplodeEvent"
+	InitObstacleEventType = "InitObstacleEvent"
 )
 
 // Event make change on Graph
@@ -29,9 +30,12 @@ type UserMoveEvent struct {
 
 func (a *UserMoveEvent) handle(g *Game) {
 	log.Info("handle UserMoveEvent")
-	newX, newY := a.pos.X, a.pos.Y
-	if !validCoordinate(newX, newY) {
+	if !validCoordinate(a.pos) {
 		// move out of boarder
+		return
+	}
+	if _, ok := g.obstacleMap[a.pos]; ok {
+		// move to obstacle
 		return
 	}
 	if player, ok := g.nameToPlayers[a.name]; ok && !player.alive {
@@ -47,7 +51,9 @@ type UserDeadEvent struct {
 }
 
 func (e *UserDeadEvent) handle(game *Game) {
-	game.nameToPlayers[e.name].alive = false
+	if _, ok := game.nameToPlayers[e.name]; ok {
+		game.nameToPlayers[e.name].alive = false
+	}
 }
 
 type UserReviveEvent struct {
@@ -75,13 +81,17 @@ type SetBombEvent struct {
 
 func (e *SetBombEvent) handle(game *Game) {
 	log.Info("handle SetBombEvent")
+	if _, ok := game.obstacleMap[e.pos]; ok {
+		// set on obstacle
+		return
+	}
 	bombName := game.setBombWithTrigger(e.bombName, e.pos, make(chan struct{}))
 	if strings.HasPrefix(bombName, "random-") ||
 		strings.HasPrefix(bombName, game.localPlayerName+"-") {
 		// send explode message
 		go func() {
 			// bomb will explode after 2 seconds
-			bombTimer := time.NewTimer(2 * time.Second)
+			bombTimer := time.NewTimer(explodeTime * time.Second)
 			<-bombTimer.C
 			game.sendSync(&ExplodeEvent{
 				bombName: bombName,
@@ -112,7 +122,7 @@ func (e *ExplodeEvent) handle(game *Game) {
 		strings.HasPrefix(bomb.bombName, game.localPlayerName+"-") {
 		go func() {
 			// explosion flame will disappear after 2 seconds
-			flameTimer := time.NewTimer(2 * time.Second)
+			flameTimer := time.NewTimer(flameTime * time.Second)
 			<-flameTimer.C
 			game.sendSync(&UndoExplodeEvent{
 				pos: bomb.pos,
@@ -149,4 +159,24 @@ func (e *BombMoveEvent) handle(game *Game) {
 	delete(game.posToBombs, bomb.pos)
 	bomb.pos = e.pos
 	game.posToBombs[e.pos] = bomb
+}
+
+type InitObstacleEvent struct {
+	Obstacles []int
+}
+
+func (e *InitObstacleEvent) handle(game *Game) {
+	obstacleMap := map[Position]struct{}{}
+	for _, code := range e.Obstacles {
+		x, y := decodeXY(code)
+		pos := Position{
+			X: x,
+			Y: y,
+		}
+		if game.posToBombs[pos] != nil || game.posToPlayers[pos] != nil {
+			continue
+		}
+		obstacleMap[pos] = struct{}{}
+	}
+	game.obstacleMap = obstacleMap
 }
