@@ -54,7 +54,7 @@ func newPulsarClient(topicName, subscriptionName, keyPath string) *pulsarClient 
 	}
 	oauth := pulsar.NewAuthenticationOAuth2(oauthConfig)
 	client, err := pulsar.NewClient(pulsar.ClientOptions{
-		URL:            "pulsar+ssl://free.o-7udlj.aws-cnn1.streamnative.aws.snpulsar.cn:6651",
+		URL:            pulsarUrl,
 		Authentication: oauth,
 	})
 	if err != nil {
@@ -110,8 +110,9 @@ func (c *pulsarClient) tryUpdateObstacles() {
 			// then fail-over type can work
 			SubscriptionName: obstacleSubscriptionName,
 			// only one consumer can subscribe obstacle topic
-			Type:           pulsar.Exclusive,
-			MessageChannel: obstacleConsumerCh,
+			Type:                        pulsar.Exclusive,
+			MessageChannel:              obstacleConsumerCh,
+			SubscriptionInitialPosition: pulsar.SubscriptionPositionLatest,
 		})
 		if err != nil {
 			// subscription already has other consumers
@@ -129,6 +130,7 @@ func (c *pulsarClient) tryUpdateObstacles() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer producer.Close()
 
 	total := xGridCountInScreen * yGridCountInScreen
 
