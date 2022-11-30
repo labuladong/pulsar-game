@@ -17,8 +17,8 @@ import (
 )
 
 const (
-	screenWidth        = 600
-	screenHeight       = 500
+	screenWidth        = 200
+	screenHeight       = 200
 	gridSize           = 20
 	xGridCountInScreen = screenWidth / gridSize
 	yGridCountInScreen = screenHeight / gridSize
@@ -30,7 +30,7 @@ const (
 	// flame disappear after flameTime second
 	flameTime = 2
 	// obstacle update every updateObstacleTime second
-	updateObstacleTime = 10
+	updateObstacleTime = 3
 	// random bomb appear every randomBombTime second
 	randomBombTime = 2
 )
@@ -312,7 +312,7 @@ func (g *Game) unExplode(pos Position) {
 }
 
 // produce a random bomb every second
-func (g *Game) randomBombs() {
+func (g *Game) randomBombsEnable() {
 	go func() {
 		// every one seconds, generate a new bomb
 		ticker := time.NewTicker(time.Second * randomBombTime)
@@ -340,13 +340,13 @@ func (g *Game) randomBombs() {
 
 // playerName will be the subscription name
 // roomName will be the topic name
-func newGame(playerName, roomName, keyPath string) *Game {
+func newGame(playerName, roomName string) *Game {
 	info := &playerInfo{
 		name:   playerName,
 		avatar: "fff",
 		pos: Position{
-			X: 10,
-			Y: 20,
+			X: 0,
+			Y: 0,
 		},
 		alive: true,
 	}
@@ -359,7 +359,7 @@ func newGame(playerName, roomName, keyPath string) *Game {
 		flameMap:        map[Position]int{},
 		eventCh:         nil,
 		sendCh:          nil,
-		client:          newPulsarClient("room-"+roomName, playerName, keyPath),
+		client:          newPulsarClient(roomName, playerName),
 	}
 
 	// init audio player

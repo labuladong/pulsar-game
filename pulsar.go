@@ -9,30 +9,100 @@ import (
 	"time"
 )
 
+const eventAvroSchemaDef = `
+{
+  "type": "record",
+  "name": "EventMessage",
+  "namespace": "game",
+  "fields": [
+    {
+      "name": "Type",
+      "type": "string"
+    },
+    {
+      "name": "Name",
+      "type": "string"
+    },
+    {
+      "name": "Avatar",
+      "type": "string"
+    },
+    {
+      "name": "Comment",
+      "type": "string",
+	  "default": ""
+    },
+    {
+      "name": "X",
+      "type": "int"
+    },
+    {
+      "name": "Y",
+      "type": "int"
+    },
+	{
+      "name": "Alive",
+      "type": "boolean"
+    },
+    {
+      "name": "List",
+		"type": {
+			"type": "array",
+			"items" : {
+				"type":"int"
+			}
+		}
+    }
+  ]
+}
+`
+
 // EventMessage is the data in Pulsar
 type EventMessage struct {
 	// Event type
 	Type   string `json:"type"`
 	Name   string `json:"name"`
 	Avatar string `json:"avatar"`
-	X      int    `json:"x"`
-	Y      int    `json:"y"`
-	Alive  bool   `json:"alive"`
-	List   []int  `json:"list"`
+	// Comment stores extra data
+	Comment string `json:"comment"`
+	X       int    `json:"x"`
+	Y       int    `json:"y"`
+	Alive   bool   `json:"alive"`
+	List    []int  `json:"list"`
 }
 
 type pulsarClient struct {
-	topicName, subscriptionName string
-	client                      pulsar.Client
-	producer                    pulsar.Producer
-	consumer                    pulsar.Consumer
-	consumeCh                   chan pulsar.ConsumerMessage
+	roomName, playerName string
+	client               pulsar.Client
+	producer             pulsar.Producer
+	consumer             pulsar.Consumer
+	consumeCh            chan pulsar.ConsumerMessage
 	// exclude type
 	exclusiveObstacleConsumer pulsar.Consumer
 	// to read the latest obstacle graph
 	obstacleReader pulsar.Reader
 	// subscribe the obstacle topic,
 	closeCh chan struct{}
+}
+
+func (c *pulsarClient) getEventTopicName() string {
+	return c.roomName + "-event-topic"
+}
+
+func (c *pulsarClient) getMapTopicName() string {
+	return c.roomName + "-map-topic"
+}
+
+func (c *pulsarClient) getEventSubscriptionName() string {
+	return c.playerName + "-event-sub"
+}
+
+func (c *pulsarClient) getMapSubscriptionName() string {
+	return c.playerName + "-map-sub"
+}
+
+func (c *pulsarClient) getUniqueMapSubscriptionName() string {
+	return c.roomName + "-map-sub"
 }
 
 func (c *pulsarClient) Close() {
@@ -44,27 +114,22 @@ func (c *pulsarClient) Close() {
 	close(c.consumeCh)
 }
 
-func newPulsarClient(topicName, subscriptionName, keyPath string) *pulsarClient {
-	oauthConfig := map[string]string{
-		"type":       "client_credentials",
-		"issuerUrl":  "https://auth.streamnative.cloud/",
-		"audience":   "urn:sn:pulsar:o-7udlj:free",
-		"privateKey": keyPath,
-		"clientId":   "fdl_test",
-	}
-	oauth := pulsar.NewAuthenticationOAuth2(oauthConfig)
+func newPulsarClient(roomName, playerName string) *pulsarClient {
+	topicName := roomName + "-event-topic"
+	subscriptionName := playerName
 	client, err := pulsar.NewClient(pulsar.ClientOptions{
-		URL:            pulsarUrl,
-		Authentication: oauth,
+		URL: pulsarUrl,
 	})
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal("[newPulsarClient]", err)
 	}
 
 	// player event topicName
 	producer, err := client.CreateProducer(pulsar.ProducerOptions{
 		Topic:           topicName,
 		DisableBatching: true,
+		// use schema to confirm the structure of message
+		Schema: pulsar.NewJSONSchema(eventAvroSchemaDef, nil),
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -75,34 +140,37 @@ func newPulsarClient(topicName, subscriptionName, keyPath string) *pulsarClient 
 		SubscriptionName: subscriptionName,
 		Type:             pulsar.Exclusive,
 		MessageChannel:   consumeCh,
+		// use schema to confirm the structure of message
+		Schema: pulsar.NewJSONSchema(eventAvroSchemaDef, nil),
 	})
 	if err != nil {
 		log.Fatal("this player has logged in")
 	}
 	// only handle new event
-	err = consumer.SeekByTime(time.Now())
+	err = consumer.Seek(pulsar.LatestMessageID())
 
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	return &pulsarClient{
-		topicName:        topicName,
-		subscriptionName: subscriptionName,
-		client:           client,
-		producer:         producer,
-		consumer:         consumer,
-		consumeCh:        consumeCh,
-		closeCh:          make(chan struct{}),
+		playerName: playerName,
+		roomName:   roomName,
+		client:     client,
+		producer:   producer,
+		consumer:   consumer,
+		consumeCh:  consumeCh,
+		closeCh:    make(chan struct{}),
 	}
 }
 
 // try grab exclusive consumer, if success, send new random graph
 func (c *pulsarClient) tryUpdateObstacles() {
-	obstacleTopicName := c.topicName + "-obstacle"
+	obstacleTopicName := c.getMapTopicName()
 	// every minute update random obstacle
 	if c.exclusiveObstacleConsumer == nil {
-		obstacleSubscriptionName := obstacleTopicName + "-sub"
+		// all player will get same subscription name
+		obstacleSubscriptionName := c.getUniqueMapSubscriptionName()
 		obstacleConsumerCh := make(chan pulsar.ConsumerMessage)
 		obstacleConsumer, err := c.client.Subscribe(pulsar.ConsumerOptions{
 			Topic: obstacleTopicName,
@@ -125,6 +193,7 @@ func (c *pulsarClient) tryUpdateObstacles() {
 	// obstacle topic producer
 	producer, err := c.client.CreateProducer(pulsar.ProducerOptions{
 		Topic:           obstacleTopicName,
+		Schema:          pulsar.NewJSONSchema(eventAvroSchemaDef, nil),
 		DisableBatching: true,
 	})
 	if err != nil {
@@ -138,11 +207,7 @@ func (c *pulsarClient) tryUpdateObstacles() {
 		Type: InitObstacleEventType,
 		List: sample(total, total/obstacleRatio),
 	}
-	bytes, err := json.Marshal(InitObstacleMsg)
-	if err != nil {
-		log.Fatal(err)
-	}
-	_, err = producer.Send(context.Background(), &pulsar.ProducerMessage{Payload: bytes})
+	_, err = producer.Send(context.Background(), &pulsar.ProducerMessage{Value: InitObstacleMsg})
 }
 
 func (c *pulsarClient) readLatestEvent(topicName string) Event {
@@ -153,14 +218,14 @@ func (c *pulsarClient) readLatestEvent(topicName string) Event {
 		StartMessageIDInclusive: true,
 	})
 	if err != nil {
-		log.Error(err)
+		log.Error("[readLatestEvent]", err)
 	}
 	defer reader.Close()
 
 	if reader.HasNext() {
 		msg, err := reader.Next(context.Background())
 		if err != nil {
-			log.Error(err)
+			log.Error("[readLatestEvent]", err)
 		}
 		actionMsg := EventMessage{}
 
@@ -185,9 +250,10 @@ func (c *pulsarClient) start(in chan Event) chan Event {
 					break
 				}
 				actionMsg := EventMessage{}
-				err := json.Unmarshal(msg.Payload(), &actionMsg)
+				err := msg.GetSchemaValue(&actionMsg)
 				if err != nil {
-					log.Fatal(err)
+					log.Error("[start]", err)
+					break
 				}
 				l := math.Min(float64(len(msg.Payload())), 100)
 				log.Info("receive message from pulsar:\n", string(msg.Payload())[:int(l)])
@@ -201,13 +267,12 @@ func (c *pulsarClient) start(in chan Event) chan Event {
 					break
 				}
 				actionMsg := convertEventToMsg(action)
-				bytes, err := json.Marshal(actionMsg)
+				_, err := c.producer.Send(context.Background(), &pulsar.ProducerMessage{
+					Value: actionMsg,
+				})
 				if err != nil {
-					log.Fatal(err)
-				}
-				_, err = c.producer.Send(context.Background(), &pulsar.ProducerMessage{Payload: bytes})
-				if err != nil {
-					return
+					log.Error("send msg failed:", err)
+					break
 				}
 				//log.Info("send message to pulsar:\n", string(bytes))
 
@@ -224,7 +289,7 @@ func (c *pulsarClient) start(in chan Event) chan Event {
 		c.tryUpdateObstacles()
 
 		// 2. read the latest random map
-		obstacleTopicName := c.topicName + "-obstacle"
+		obstacleTopicName := c.getMapTopicName()
 		event := c.readLatestEvent(obstacleTopicName)
 		if event != nil {
 			outCh <- event
@@ -233,7 +298,8 @@ func (c *pulsarClient) start(in chan Event) chan Event {
 		obstacleConsumerCh := make(chan pulsar.ConsumerMessage)
 		consumer, err := c.client.Subscribe(pulsar.ConsumerOptions{
 			Topic:            obstacleTopicName,
-			SubscriptionName: c.subscriptionName,
+			SubscriptionName: c.getMapSubscriptionName(),
+			Schema:           pulsar.NewJSONSchema(eventAvroSchemaDef, nil),
 			Type:             pulsar.Exclusive,
 			MessageChannel:   obstacleConsumerCh,
 		})
@@ -253,12 +319,16 @@ func (c *pulsarClient) start(in chan Event) chan Event {
 				c.tryUpdateObstacles()
 			case cm := <-obstacleConsumerCh:
 				msg := cm.Message
-				if err != nil {
-					log.Error(err)
+				if msg == nil {
+					log.Error("receive nil form topic:", obstacleTopicName)
+					break
 				}
 				actionMsg := EventMessage{}
-
-				err = json.Unmarshal(msg.Payload(), &actionMsg)
+				err := msg.GetSchemaValue(&actionMsg)
+				if err != nil {
+					log.Error("[start][read map event]", err)
+					break
+				}
 				outCh <- convertMsgToEvent(&actionMsg)
 			}
 		}
@@ -296,7 +366,8 @@ func convertEventToMsg(action Event) *EventMessage {
 			Avatar: t.avatar,
 			X:      t.pos.X,
 			Y:      t.pos.Y,
-			Alive:  false,
+
+			Alive: false,
 		}
 	case *UserReviveEvent:
 		msg = &EventMessage{
