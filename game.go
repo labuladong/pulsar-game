@@ -9,19 +9,24 @@ import (
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
 	raudio "github.com/hajimehoshi/ebiten/v2/examples/resources/audio"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
+	lru "github.com/hashicorp/golang-lru"
 	log "github.com/sirupsen/logrus"
 	"image/color"
 	"math/rand"
 	"strings"
+	"sync"
 	"time"
 )
 
 const (
-	screenWidth        = 200
-	screenHeight       = 200
+	scoreBarHeight = 30
+
+	screenWidth  = 600
+	screenHeight = 500 + scoreBarHeight
+
 	gridSize           = 20
 	xGridCountInScreen = screenWidth / gridSize
-	yGridCountInScreen = screenHeight / gridSize
+	yGridCountInScreen = (screenHeight - scoreBarHeight) / gridSize
 	bombLength         = 8
 	// there is total / obstacleRatio num obstacle in map
 	obstacleRatio = 5
@@ -36,6 +41,9 @@ const (
 )
 
 type Game struct {
+	// scores of every player
+	scores *lru.Cache
+
 	// local player playerName
 	localPlayerName string
 	nameToPlayers   map[string]*playerInfo
@@ -44,7 +52,9 @@ type Game struct {
 	nameToBombs map[string]*Bomb
 	posToBombs  map[Position]*Bomb
 
-	flameMap map[Position]int
+	flameLock sync.RWMutex
+	flameMap  map[Position]*Bomb
+	//flameMap sync.Map
 
 	obstacleMap map[Position]struct{}
 
@@ -100,19 +110,23 @@ func (g *Game) Update() error {
 		event := &UserReviveEvent{
 			playerInfo: info,
 		}
-		g.sendSync(event)
+		g.sendAsync(event)
 	} else if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
 		// quit game
 	}
 
-	if val, ok := g.flameMap[localPlayer.pos]; ok && val > 0 && localPlayer.alive {
-		//localPlayer.alive = false
+	g.flameLock.RLock()
+	if val, ok := g.flameMap[localPlayer.pos]; ok && val != nil && localPlayer.alive {
+		localPlayer.alive = false
 		// dead due to boom
 		event := &UserDeadEvent{
 			playerInfo: info,
+			// the player who set the bomb
+			killer: val.playerName,
 		}
-		g.sendSync(event)
+		g.sendAsync(event)
 	}
+	g.flameLock.RUnlock()
 
 	if dir != dirNone && localPlayer.alive {
 		nexPos := getNextPosition(localPlayer.pos, dir)
@@ -120,7 +134,7 @@ func (g *Game) Update() error {
 		event := &UserMoveEvent{
 			playerInfo: info,
 		}
-		g.sendSync(event)
+		g.sendAsync(event)
 		if bomb, ok := g.posToBombs[nexPos]; ok {
 			// push the bomb
 			go func(bomb *Bomb, direction Direction) {
@@ -142,7 +156,7 @@ func (g *Game) Update() error {
 							bombName: bomb.bombName,
 							pos:      nextPos,
 						}
-						g.sendSync(event)
+						g.sendAsync(event)
 						nextPos = getNextPosition(nextPos, dir)
 					}
 				}
@@ -157,7 +171,7 @@ func (g *Game) Update() error {
 			bombName: info.name + "-" + randStringRunes(5),
 			pos:      info.pos,
 		}
-		g.sendSync(event)
+		g.sendAsync(event)
 	}
 
 	return nil
@@ -185,7 +199,7 @@ func (g *Game) removeBomb(bombName string) {
 	}
 }
 
-func (g *Game) sendSync(event Event) {
+func (g *Game) sendAsync(event Event) {
 	// don't block
 	select {
 	case g.sendCh <- event:
@@ -218,24 +232,41 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		ebitenutil.DebugPrint(screen, fmt.Sprintf("You are dead, press R to revive."))
 	}
 
+	scoreStr := strings.Builder{}
+	scoreStr.WriteString("scores: ")
+	for _, k := range g.scores.Keys() {
+		score, ok := g.scores.Get(k)
+		if !ok {
+			continue
+		}
+		scoreStr.WriteString(k.(string))
+		scoreStr.WriteString(" = ")
+		scoreStr.WriteString(score.(string) + "; ")
+	}
+	// print the score of all players
+	ebitenutil.DebugPrintAt(screen, scoreStr.String(), 0, screenHeight-scoreBarHeight+10)
+
+	g.flameLock.RLock()
 	for pos, val := range g.flameMap {
 		// only val > 0 means flame
-		if val > 0 {
+		if val != nil {
 			ebitenutil.DrawRect(screen, float64(pos.X*gridSize), float64(pos.Y*gridSize), gridSize, gridSize, flameColor)
 		}
 	}
+	g.flameLock.RUnlock()
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
 	return screenWidth, screenHeight
 }
 
-func (g *Game) explode(pos Position) {
-	if bomb, ok := g.posToBombs[pos]; !ok {
+func (g *Game) explode(bomb *Bomb) {
+	pos := bomb.pos
+	if _, ok := g.posToBombs[pos]; !ok {
 		return
-	} else {
-		g.removeBomb(bomb.bombName)
 	}
+	// remove the bomb in the grid
+	g.removeBomb(bomb.bombName)
 
 	// flames
 	var positions []Position
@@ -268,19 +299,19 @@ func (g *Game) explode(pos Position) {
 		positions = append(positions, p)
 	}
 
+	g.flameLock.Lock()
+	defer g.flameLock.Unlock()
 	for _, position := range positions {
 		if !validCoordinate(position) {
 			continue
 		}
-		if val, ok := g.flameMap[position]; ok {
-			g.flameMap[position] = val + 1
-		} else {
-			g.flameMap[position] = 1
-		}
-		// dead player
-		if player, ok := g.posToPlayers[position]; ok {
-			player.alive = false
-		}
+		// set value to the bomb pointer
+		g.flameMap[position] = bomb
+		// if a player standing there, dead
+		// todo
+		//if player, ok := g.posToPlayers[position]; ok {
+		//	player.alive = false
+		//}
 	}
 
 }
@@ -293,6 +324,9 @@ func (g *Game) unExplode(pos Position) {
 	for j := pos.Y - bombLength; j < pos.Y+bombLength+1; j++ {
 		positions = append(positions, Position{X: pos.X, Y: j})
 	}
+	g.flameLock.Lock()
+	defer g.flameLock.Unlock()
+	bomb := g.flameMap[pos]
 	for _, position := range positions {
 		if !validCoordinate(position) {
 			continue
@@ -303,10 +337,8 @@ func (g *Game) unExplode(pos Position) {
 		//	// so we ensure all grids is flame, then trigger this event
 		//	return
 		//}
-		if val, ok := g.flameMap[position]; ok && val > 0 {
-			g.flameMap[position] = val - 1
-		} else if ok {
-			g.flameMap[position] = 0
+		if _, ok := g.flameMap[position]; bomb == nil || (ok) {
+			g.flameMap[position] = nil
 		}
 	}
 }
@@ -329,7 +361,7 @@ func (g *Game) randomBombsEnable() {
 				if _, ok := g.posToBombs[randomPos]; ok {
 					continue
 				}
-				g.sendSync(&SetBombEvent{
+				g.sendAsync(&SetBombEvent{
 					bombName: "random-" + randStringRunes(5),
 					pos:      randomPos,
 				})
@@ -350,17 +382,27 @@ func newGame(playerName, roomName string) *Game {
 		},
 		alive: true,
 	}
+	client := newPulsarClient(roomName, playerName)
+	cache, err := lru.New(5)
 	g := &Game{
+		scores:          cache,
 		localPlayerName: playerName,
 		nameToPlayers:   map[string]*playerInfo{},
 		posToPlayers:    map[Position]*playerInfo{},
 		nameToBombs:     map[string]*Bomb{},
 		posToBombs:      map[Position]*Bomb{},
-		flameMap:        map[Position]int{},
+		flameMap:        map[Position]*Bomb{},
 		eventCh:         nil,
 		sendCh:          nil,
-		client:          newPulsarClient(roomName, playerName),
+		client:          client,
 	}
+
+	// pulsar tableview update scores of every player
+	client.tableView.ForEachAndListen(func(playerName string, i interface{}) error {
+		score := *i.(*string)
+		g.scores.Add(playerName, score)
+		return nil
+	})
 
 	// init audio player
 	jabD, err := wav.DecodeWithoutResampling(bytes.NewReader(raudio.Jab_wav))

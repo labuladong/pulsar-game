@@ -6,10 +6,11 @@ import (
 	"github.com/apache/pulsar-client-go/pulsar"
 	log "github.com/sirupsen/logrus"
 	"math"
+	"reflect"
 	"time"
 )
 
-const eventAvroSchemaDef = `
+const eventJsonSchemaDef = `
 {
   "type": "record",
   "name": "EventMessage",
@@ -76,6 +77,7 @@ type pulsarClient struct {
 	client               pulsar.Client
 	producer             pulsar.Producer
 	consumer             pulsar.Consumer
+	tableView            pulsar.TableView
 	consumeCh            chan pulsar.ConsumerMessage
 	// exclude type
 	exclusiveObstacleConsumer pulsar.Consumer
@@ -110,6 +112,7 @@ func (c *pulsarClient) Close() {
 	c.consumer.Close()
 	c.client.Close()
 	c.closeCh <- struct{}{}
+	c.tableView.Close()
 	close(c.closeCh)
 	close(c.consumeCh)
 }
@@ -129,7 +132,7 @@ func newPulsarClient(roomName, playerName string) *pulsarClient {
 		Topic:           topicName,
 		DisableBatching: true,
 		// use schema to confirm the structure of message
-		Schema: pulsar.NewJSONSchema(eventAvroSchemaDef, nil),
+		Schema: pulsar.NewJSONSchema(eventJsonSchemaDef, nil),
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -141,19 +144,28 @@ func newPulsarClient(roomName, playerName string) *pulsarClient {
 		Type:             pulsar.Exclusive,
 		MessageChannel:   consumeCh,
 		// use schema to confirm the structure of message
-		Schema: pulsar.NewJSONSchema(eventAvroSchemaDef, nil),
+		Schema: pulsar.NewJSONSchema(eventJsonSchemaDef, nil),
 	})
 	if err != nil {
 		log.Fatal("this player has logged in")
 	}
 	// only handle new event
 	err = consumer.Seek(pulsar.LatestMessageID())
+	if err != nil {
+		log.Fatal(err)
+	}
 
+	tableView, err := client.CreateTableView(pulsar.TableViewOptions{
+		Topic:           roomName + "-score-topic",
+		Schema:          pulsar.NewStringSchema(nil),
+		SchemaValueType: reflect.TypeOf(""),
+	})
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	return &pulsarClient{
+		tableView:  tableView,
 		playerName: playerName,
 		roomName:   roomName,
 		client:     client,
@@ -193,7 +205,7 @@ func (c *pulsarClient) tryUpdateObstacles() {
 	// obstacle topic producer
 	producer, err := c.client.CreateProducer(pulsar.ProducerOptions{
 		Topic:           obstacleTopicName,
-		Schema:          pulsar.NewJSONSchema(eventAvroSchemaDef, nil),
+		Schema:          pulsar.NewJSONSchema(eventJsonSchemaDef, nil),
 		DisableBatching: true,
 	})
 	if err != nil {
@@ -299,17 +311,19 @@ func (c *pulsarClient) start(in chan Event) chan Event {
 		consumer, err := c.client.Subscribe(pulsar.ConsumerOptions{
 			Topic:            obstacleTopicName,
 			SubscriptionName: c.getMapSubscriptionName(),
-			Schema:           pulsar.NewJSONSchema(eventAvroSchemaDef, nil),
+			Schema:           pulsar.NewJSONSchema(eventJsonSchemaDef, nil),
 			Type:             pulsar.Exclusive,
 			MessageChannel:   obstacleConsumerCh,
 		})
 		if err != nil {
-			log.Fatal(err)
+			log.Fatal("[start][go func] cannot create map consumer", err)
 		}
+		//defer consumer.Unsubscribe()
 		defer consumer.Close()
-		err = consumer.SeekByTime(time.Now())
+
+		err = consumer.Seek(pulsar.LatestMessageID())
 		if err != nil {
-			log.Fatal(err)
+			log.Fatal("[start][go func] cannot seek to latest message", err)
 		}
 
 		for {
@@ -323,6 +337,8 @@ func (c *pulsarClient) start(in chan Event) chan Event {
 					log.Error("receive nil form topic:", obstacleTopicName)
 					break
 				}
+				consumer.Ack(msg)
+				log.Infoln("read from map topic")
 				actionMsg := EventMessage{}
 				err := msg.GetSchemaValue(&actionMsg)
 				if err != nil {
@@ -366,8 +382,9 @@ func convertEventToMsg(action Event) *EventMessage {
 			Avatar: t.avatar,
 			X:      t.pos.X,
 			Y:      t.pos.Y,
-
-			Alive: false,
+			// record the killer player name
+			Comment: t.killer,
+			Alive:   false,
 		}
 	case *UserReviveEvent:
 		msg = &EventMessage{
@@ -446,6 +463,7 @@ func convertMsgToEvent(msg *EventMessage) Event {
 	case UserDeadEventType:
 		return &UserDeadEvent{
 			playerInfo: info,
+			killer:     msg.Comment,
 		}
 	case UserReviveEventType:
 		return &UserReviveEvent{

@@ -4,8 +4,14 @@
 
 - [x] Players can `push` bomb, this action can make bomb move linearly.
 
-- [ ] Generate random obstacles in grids.
+- [x] Generate random obstacles in grids.
 
-- [ ] Use `seek` to avoid action replay. 
+- [x] Use `seek` to avoid action replay. 
 
 - [ ] Build go code to web assembly to deploy this game on web.
+
+- [x] Record killer name.
+- [x] Use Pulsar function and table view to calculate score of every player.
+- [ ] Use Pulsar sql to query.
+- [ ] Use Offloader to store event.
+- [ ] Use security to auth player.

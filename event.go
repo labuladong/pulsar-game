@@ -48,6 +48,7 @@ func (a *UserMoveEvent) handle(g *Game) {
 
 type UserDeadEvent struct {
 	*playerInfo
+	killer string
 }
 
 func (e *UserDeadEvent) handle(game *Game) {
@@ -93,7 +94,7 @@ func (e *SetBombEvent) handle(game *Game) {
 			// bomb will explode after 2 seconds
 			bombTimer := time.NewTimer(explodeTime * time.Second)
 			<-bombTimer.C
-			game.sendSync(&ExplodeEvent{
+			game.sendAsync(&ExplodeEvent{
 				bombName: bombName,
 			})
 		}()
@@ -117,14 +118,15 @@ func (e *ExplodeEvent) handle(game *Game) {
 	case bomb.explodeCh <- struct{}{}:
 	default:
 	}
-	game.explode(bomb.pos)
+	game.explode(bomb)
+
 	if strings.HasPrefix(bomb.bombName, "random-") ||
 		strings.HasPrefix(bomb.bombName, game.localPlayerName+"-") {
 		go func() {
 			// explosion flame will disappear after 2 seconds
 			flameTimer := time.NewTimer(flameTime * time.Second)
 			<-flameTimer.C
-			game.sendSync(&UndoExplodeEvent{
+			game.sendAsync(&UndoExplodeEvent{
 				pos: bomb.pos,
 			})
 		}()
