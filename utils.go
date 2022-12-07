@@ -6,11 +6,12 @@ import (
 )
 
 var (
-	playerColor     = color.RGBA{R: 0xFF, A: 0xff, G: 0x34}
-	deadPlayerColor = color.RGBA{R: 0xeb, A: 0xc4, G: 0x40}
-	bombColor       = color.RGBA{R: 218, G: 165, B: 32, A: 0xff}
-	flameColor      = color.RGBA{R: 255, G: 215, B: 0, A: 0xaf}
-	obstacleColor   = color.White
+	playerColor                 = color.RGBA{R: 0xFF, A: 0xff, G: 0x34}
+	deadPlayerColor             = color.RGBA{R: 0xeb, A: 0xc4, G: 0x40}
+	bombColor                   = color.RGBA{R: 218, G: 165, B: 32, A: 0xff}
+	flameColor                  = color.RGBA{R: 255, G: 215, B: 0, A: 0xaf}
+	destructibleObstacleColor   = color.Gray{Y: 90}
+	indestructibleObstacleColor = color.White
 )
 
 type playerInfo struct {
@@ -106,7 +107,7 @@ func sample(n, k int) []int {
 	return pickedNums
 }
 
-func sliceContains(slice []Position, p Position) bool {
+func sliceContains(slice []int, p int) bool {
 	for _, e := range slice {
 		if e == p {
 			return true

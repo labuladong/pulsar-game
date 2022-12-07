@@ -15,7 +15,7 @@ const (
 	MoveBombEventType     = "BombMoveEvent"
 	ExplodeEventType      = "ExplodeEvent"
 	UndoExplodeEventType  = "UndoExplodeEvent"
-	InitObstacleEventType = "InitObstacleEvent"
+	InitObstacleEventType = "UpdateMapEvent"
 )
 
 // Event make change on Graph
@@ -163,13 +163,19 @@ func (e *BombMoveEvent) handle(game *Game) {
 	game.posToBombs[e.pos] = bomb
 }
 
-type InitObstacleEvent struct {
+type UpdateMapEvent struct {
 	Obstacles []int
 }
 
-func (e *InitObstacleEvent) handle(game *Game) {
-	obstacleMap := map[Position]struct{}{}
+func (e *UpdateMapEvent) handle(game *Game) {
+	obstacleMap := map[Position]ObstacleType{}
 	for _, code := range e.Obstacles {
+		destructible := false
+		if code < 0 {
+			// this is a destructible obstacle
+			destructible = true
+			code = -code
+		}
 		x, y := decodeXY(code)
 		pos := Position{
 			X: x,
@@ -178,7 +184,11 @@ func (e *InitObstacleEvent) handle(game *Game) {
 		if game.posToBombs[pos] != nil || game.posToPlayers[pos] != nil {
 			continue
 		}
-		obstacleMap[pos] = struct{}{}
+		if destructible {
+			obstacleMap[pos] = destructibleObstacleType
+		} else {
+			obstacleMap[pos] = indestructibleObstacleType
+		}
 	}
 	game.obstacleMap = obstacleMap
 }

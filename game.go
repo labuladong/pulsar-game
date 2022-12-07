@@ -26,18 +26,29 @@ const (
 
 	gridSize           = 20
 	xGridCountInScreen = screenWidth / gridSize
+	// display score board at bottom
 	yGridCountInScreen = (screenHeight - scoreBarHeight) / gridSize
-	bombLength         = 8
-	// there is total / obstacleRatio num obstacle in map
-	obstacleRatio = 5
+	totalGridCount     = xGridCountInScreen * yGridCountInScreen
+
+	bombLength = 8
+	// there are indestructibleObstacleCount obstacles in map
+	indestructibleObstacleCount = totalGridCount / 5
+	destructibleObstacleCount   = totalGridCount / 4
 	// bomb explode after explodeTime second
 	explodeTime = 2
 	// flame disappear after flameTime second
 	flameTime = 2
 	// obstacle update every updateObstacleTime second
-	updateObstacleTime = 3
+	updateObstacleTime = 30
 	// random bomb appear every randomBombTime second
 	randomBombTime = 2
+)
+
+type ObstacleType int
+
+const (
+	destructibleObstacleType   ObstacleType = 1
+	indestructibleObstacleType ObstacleType = 2
 )
 
 type Game struct {
@@ -52,11 +63,15 @@ type Game struct {
 	nameToBombs map[string]*Bomb
 	posToBombs  map[Position]*Bomb
 
+	// although all events are handled serially,
+	// the flameMap may be updated by multiple go routines
 	flameLock sync.RWMutex
 	flameMap  map[Position]*Bomb
-	//flameMap sync.Map
 
-	obstacleMap map[Position]struct{}
+	// protect for map update and destroy obstacles
+	obstacleLock sync.RWMutex
+	// two types of obstacle
+	obstacleMap map[Position]ObstacleType
 
 	// audio player
 	audioContext *audio.Context
@@ -129,16 +144,16 @@ func (g *Game) Update() error {
 	g.flameLock.RUnlock()
 
 	if dir != dirNone && localPlayer.alive {
-		nexPos := getNextPosition(localPlayer.pos, dir)
-		info.pos = nexPos
+		nextPlayerPos := getNextPosition(localPlayer.pos, dir)
+		info.pos = nextPlayerPos
 		event := &UserMoveEvent{
 			playerInfo: info,
 		}
 		g.sendAsync(event)
-		if bomb, ok := g.posToBombs[nexPos]; ok {
+		if bomb, ok := g.posToBombs[nextPlayerPos]; ok {
 			// push the bomb
 			go func(bomb *Bomb, direction Direction) {
-				nextPos := getNextPosition(bomb.pos, dir)
+				nextPos := getNextPosition(bomb.pos, direction)
 				ticker := time.NewTicker(time.Second / 2)
 				defer ticker.Stop()
 				for i := 0; i < 8; i++ {
@@ -147,17 +162,20 @@ func (g *Game) Update() error {
 						// bomb exploded, stop
 						return
 					case <-ticker.C:
-						// todo why bomb can cross the obstacle?
-						if _, ok = g.obstacleMap[nexPos]; !validCoordinate(nexPos) || ok {
+						g.obstacleLock.RLock()
+						if _, ok = g.obstacleMap[nextPos]; !validCoordinate(nextPos) || ok {
 							// move to border or obstacle, stop
+							g.obstacleLock.RUnlock()
 							return
 						}
+						g.obstacleLock.RUnlock()
+
 						event := &BombMoveEvent{
 							bombName: bomb.bombName,
 							pos:      nextPos,
 						}
 						g.sendAsync(event)
-						nextPos = getNextPosition(nextPos, dir)
+						nextPos = getNextPosition(nextPos, direction)
 					}
 				}
 			}(bomb, dir)
@@ -214,8 +232,12 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		ebitenutil.DrawRect(screen, float64(pos.X*gridSize), float64(pos.Y*gridSize), gridSize, gridSize, bombColor)
 	}
 
-	for pos, _ := range g.obstacleMap {
-		ebitenutil.DrawRect(screen, float64(pos.X*gridSize), float64(pos.Y*gridSize), gridSize, gridSize, obstacleColor)
+	for pos, t := range g.obstacleMap {
+		if t == destructibleObstacleType {
+			ebitenutil.DrawRect(screen, float64(pos.X*gridSize), float64(pos.Y*gridSize), gridSize, gridSize, destructibleObstacleColor)
+		} else {
+			ebitenutil.DrawRect(screen, float64(pos.X*gridSize), float64(pos.Y*gridSize), gridSize, gridSize, indestructibleObstacleColor)
+		}
 	}
 
 	for _, player := range g.nameToPlayers {
@@ -268,45 +290,52 @@ func (g *Game) explode(bomb *Bomb) {
 	// remove the bomb in the grid
 	g.removeBomb(bomb.bombName)
 
-	// flames
+	// calculate flames
+	g.obstacleLock.RLock()
 	var positions []Position
 	for i := pos.X - 1; i >= pos.X-bombLength; i-- {
 		p := Position{X: i, Y: pos.Y}
-		if _, ok := g.obstacleMap[p]; ok {
+		if t, ok := g.obstacleMap[p]; ok && t == indestructibleObstacleType {
 			break
 		}
 		positions = append(positions, p)
 	}
 	for i := pos.X; i <= pos.X+bombLength; i++ {
 		p := Position{X: i, Y: pos.Y}
-		if _, ok := g.obstacleMap[p]; ok {
+		if t, ok := g.obstacleMap[p]; ok && t == indestructibleObstacleType {
 			break
 		}
 		positions = append(positions, p)
 	}
 	for j := pos.Y - 1; j >= pos.Y-bombLength; j-- {
 		p := Position{X: pos.X, Y: j}
-		if _, ok := g.obstacleMap[p]; ok {
+		if t, ok := g.obstacleMap[p]; ok && t == indestructibleObstacleType {
 			break
 		}
 		positions = append(positions, p)
 	}
 	for j := pos.Y; j <= pos.Y+bombLength; j++ {
 		p := Position{X: pos.X, Y: j}
-		if _, ok := g.obstacleMap[p]; ok {
+		if t, ok := g.obstacleMap[p]; ok && t == indestructibleObstacleType {
 			break
 		}
 		positions = append(positions, p)
 	}
+	g.obstacleLock.RUnlock()
 
 	g.flameLock.Lock()
+	g.obstacleLock.Lock()
 	defer g.flameLock.Unlock()
+	defer g.obstacleLock.Unlock()
 	for _, position := range positions {
 		if !validCoordinate(position) {
 			continue
 		}
 		// set value to the bomb pointer
 		g.flameMap[position] = bomb
+		if t, ok := g.obstacleMap[position]; ok && t == destructibleObstacleType {
+			delete(g.obstacleMap, position)
+		}
 		// if a player standing there, dead
 		// todo
 		//if player, ok := g.posToPlayers[position]; ok {

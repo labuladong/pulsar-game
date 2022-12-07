@@ -213,11 +213,20 @@ func (c *pulsarClient) tryUpdateObstacles() {
 	}
 	defer producer.Close()
 
-	total := xGridCountInScreen * yGridCountInScreen
+	indestructibleObstacles := sample(totalGridCount, indestructibleObstacleCount)
+
+	var destructibleObstacles []int
+	for _, v := range sample(totalGridCount, indestructibleObstacleCount+destructibleObstacleCount) {
+		// ignore efficiency, just keep simple, brutal force deduplicate
+		if !sliceContains(indestructibleObstacles, v) {
+			// for destructibleObstacleType, we use negative number to present
+			destructibleObstacles = append(destructibleObstacles, -v)
+		}
+	}
 
 	InitObstacleMsg := &EventMessage{
 		Type: InitObstacleEventType,
-		List: sample(total, total/obstacleRatio),
+		List: append(indestructibleObstacles, destructibleObstacles...),
 	}
 	_, err = producer.Send(context.Background(), &pulsar.ProducerMessage{Value: InitObstacleMsg})
 }
@@ -422,7 +431,7 @@ func convertEventToMsg(action Event) *EventMessage {
 			X:    t.pos.X,
 			Y:    t.pos.Y,
 		}
-	case *InitObstacleEvent:
+	case *UpdateMapEvent:
 		msg = &EventMessage{
 			Type: InitObstacleEventType,
 			List: t.Obstacles,
@@ -479,7 +488,7 @@ func convertMsgToEvent(msg *EventMessage) Event {
 			pos: info.pos,
 		}
 	case InitObstacleEventType:
-		return &InitObstacleEvent{
+		return &UpdateMapEvent{
 			Obstacles: msg.List,
 		}
 	}
